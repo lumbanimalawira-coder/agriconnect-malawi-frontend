@@ -385,6 +385,23 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 .private-section { background:linear-gradient(135deg,#f8f9ff,#eef0ff); border:2px solid #c5cae9; border-radius:16px; padding:20px; }
 .private-label { display:flex; align-items:center; gap:8px; color:#3949ab; font-weight:700; font-size:0.85rem; margin-bottom:14px; }
 
+/* ADMIN PASSWORD MODAL */
+.admin-pw-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9998; display:none; align-items:center; justify-content:center; padding:16px; backdrop-filter:blur(4px); }
+.admin-pw-overlay.show { display:flex; }
+.admin-pw-box { background:#fff; border-radius:20px; padding:36px 32px; max-width:400px; width:100%; box-shadow:0 12px 60px rgba(0,0,0,0.35); text-align:center; position:relative; }
+.admin-pw-icon { font-size:2.8rem; margin-bottom:12px; }
+.admin-pw-title { font-family:'Playfair Display',serif; font-size:1.5rem; font-weight:900; color:#1a1a2e; margin-bottom:6px; }
+.admin-pw-sub { font-size:0.85rem; color:var(--muted); margin-bottom:22px; }
+.admin-pw-input { width:100%; padding:12px 16px; border:2px solid var(--border); border-radius:12px; font-family:'DM Sans',sans-serif; font-size:1rem; outline:none; letter-spacing:2px; text-align:center; transition:border-color 0.2s; margin-bottom:12px; }
+.admin-pw-input:focus { border-color:#3949ab; }
+.admin-pw-input.shake { animation:shake 0.4s ease; border-color:var(--red); }
+.admin-pw-btn { width:100%; padding:12px; background:linear-gradient(135deg,#1a1a2e,#3949ab); color:#fff; border:none; border-radius:12px; font-family:'DM Sans',sans-serif; font-size:0.95rem; font-weight:700; cursor:pointer; margin-bottom:10px; transition:opacity 0.2s; }
+.admin-pw-btn:hover { opacity:0.9; }
+.admin-pw-cancel { background:none; border:none; color:var(--muted); font-family:'DM Sans',sans-serif; font-size:0.85rem; cursor:pointer; text-decoration:underline; }
+.admin-pw-error { color:var(--red); font-size:0.82rem; margin-bottom:10px; display:none; }
+.admin-pw-attempts { color:var(--muted); font-size:0.75rem; margin-top:8px; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)} }
+
 /* PHOTO UPLOAD */
 .photo-upload-area { border:2.5px dashed var(--border); border-radius:14px; padding:24px; text-align:center; cursor:pointer; transition:all 0.2s; background:#fafaf8; position:relative; margin-bottom:16px; }
 .photo-upload-area:hover { border-color:var(--green); background:#f0faf3; }
@@ -403,6 +420,20 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<!-- ADMIN PASSWORD MODAL -->
+<div class="admin-pw-overlay" id="adminPwOverlay">
+  <div class="admin-pw-box">
+    <div class="admin-pw-icon">🔐</div>
+    <div class="admin-pw-title">Developer Admin Access</div>
+    <div class="admin-pw-sub">This area is restricted. Enter the admin password to continue.</div>
+    <div class="admin-pw-error" id="adminPwError">Incorrect password. Please try again.</div>
+    <input class="admin-pw-input" type="password" id="adminPwInput" placeholder="Enter password" onkeydown="if(event.key==='Enter')verifyAdminPw()" autocomplete="off" />
+    <button class="admin-pw-btn" onclick="verifyAdminPw()">🔓 Unlock Admin Panel</button>
+    <button class="admin-pw-cancel" onclick="closeAdminPw()">Cancel</button>
+    <div class="admin-pw-attempts" id="adminPwAttempts"></div>
+  </div>
+</div>
+
 <!-- NAV -->
 <nav class="nav">
   <div class="nav-logo">&#127806; AgriConnect <span>Malawi</span></div>
@@ -412,7 +443,7 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
     <button class="nav-btn" onclick="showPage('trends')">Trends</button>
     <button class="nav-btn" onclick="showPage('chat')">Messages</button>
     <button class="nav-btn" onclick="showPage('dashboard')">Dashboard</button>
-    <button class="nav-btn" onclick="showPage('admin')" title="Admin">Admin</button>
+    <button class="nav-btn" onclick="requestAdminAccess()" title="Admin">Admin</button>
     <button class="nav-btn primary" id="authBtn" onclick="showPage('login')">Login</button>
     <div class="user-badge" id="userBadge" style="display:none">
       <div class="dot"></div>
@@ -430,7 +461,7 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
   <button class="nav-btn" onclick="showPage('trends');closeMobileNav()">Trends</button>
   <button class="nav-btn" onclick="showPage('chat');closeMobileNav()">Messages</button>
   <button class="nav-btn" onclick="showPage('dashboard');closeMobileNav()">Dashboard</button>
-  <button class="nav-btn" onclick="showPage('admin');closeMobileNav()">Admin</button>
+  <button class="nav-btn" onclick="requestAdminAccess();closeMobileNav()">Admin</button>
   <button class="nav-btn primary" id="mobileAuthBtn" onclick="showPage('login');closeMobileNav()">Login</button>
 </div>
 
@@ -1121,8 +1152,59 @@ let trendData = {
   rice:      { supply:60, demand:75, price:58, avg:'MK 520', change:'+6%', forecast:'Rising' },
 };
 
+// ===== ADMIN ACCESS CONTROL =====
+const ADMIN_PW = 'MALAWIRA.3333#.';
+let adminUnlocked = false;
+let adminAttempts = 0;
+const MAX_ATTEMPTS = 5;
+
+function requestAdminAccess() {
+  if (adminUnlocked) { showPage('admin'); return; }
+  document.getElementById('adminPwInput').value = '';
+  document.getElementById('adminPwError').style.display = 'none';
+  document.getElementById('adminPwAttempts').textContent = '';
+  document.getElementById('adminPwOverlay').classList.add('show');
+  setTimeout(()=>document.getElementById('adminPwInput').focus(), 100);
+}
+function verifyAdminPw() {
+  if (adminAttempts >= MAX_ATTEMPTS) {
+    document.getElementById('adminPwError').textContent = 'Too many failed attempts. Refresh the page to try again.';
+    document.getElementById('adminPwError').style.display = 'block';
+    document.getElementById('adminPwInput').disabled = true;
+    return;
+  }
+  const val = document.getElementById('adminPwInput').value;
+  if (val === ADMIN_PW) {
+    adminUnlocked = true;
+    adminAttempts = 0;
+    document.getElementById('adminPwOverlay').classList.remove('show');
+    showPage('admin');
+    showToast('Admin access granted.', 'success');
+  } else {
+    adminAttempts++;
+    const remaining = MAX_ATTEMPTS - adminAttempts;
+    const input = document.getElementById('adminPwInput');
+    input.classList.add('shake');
+    setTimeout(()=>input.classList.remove('shake'), 400);
+    document.getElementById('adminPwError').textContent = 'Incorrect password. Please try again.';
+    document.getElementById('adminPwError').style.display = 'block';
+    document.getElementById('adminPwAttempts').textContent = remaining > 0 ? remaining + ' attempt(s) remaining.' : '';
+    document.getElementById('adminPwInput').value = '';
+    if (adminAttempts >= MAX_ATTEMPTS) {
+      document.getElementById('adminPwError').textContent = 'Too many failed attempts. Refresh the page to try again.';
+      document.getElementById('adminPwInput').disabled = true;
+      document.getElementById('adminPwAttempts').textContent = '';
+    }
+  }
+}
+function closeAdminPw() {
+  document.getElementById('adminPwOverlay').classList.remove('show');
+  document.getElementById('adminPwInput').value = '';
+}
+
 // ===== NAVIGATION =====
 function showPage(pg) {
+  if (pg === 'admin' && !adminUnlocked) { requestAdminAccess(); return; }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const el = document.getElementById('page-'+pg);
   if(el) el.classList.add('active');
